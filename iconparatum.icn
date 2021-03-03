@@ -1,0 +1,656 @@
+############################################################################
+#
+#  File:     iconparatum.icn
+#
+#  Subject:  Multilingual learning game
+#
+#  Author:   Jason Martin <agrellum@gmail.com>
+#
+#  Date:     March 3, 2021
+#
+############################################################################
+#
+#  Source code and other files                - License: MIT License
+#  Modified "https://openclipart.org/" images - License: CC Zero 1.0
+#
+############################################################################
+#
+#  Version:  1.0.0
+#
+############################################################################
+#
+#  Compile with Object Icon compiler : objecticon.sourceforge.net
+#     oit ./iconparatum.icn
+#        then ./iconparatum to run
+#
+############################################################################
+
+import
+   gui(Align, Dialog, EmptyBorder, Event,
+       Grid, IconButton, Image, ImagePaint,
+       Label, List, RangeSpin, TextButton,
+       TextField, TextPaint, scale),
+   io(Files, stop),
+   ipl.browser(HTMLMessageDialog),
+   ipl.random(permutation, randomize),
+   xml(XmlParser)
+
+class IConparatum(Dialog)
+   private
+      attempts,
+      cancel,
+      chalkboard,
+      check_spelt,
+      correct_answer,
+      grade,
+      grades,
+      language,
+      locked,
+      multiple_choice,
+      my_locale,
+      page_num,
+      page_number,
+      posted,
+      quiz_num,
+      reply_a,
+      reply_b,
+      reply_c,
+      reply_d,
+      report_card,
+      resources,
+      spell,
+      spelt,
+      success,
+      test_format,
+      user_msg
+
+   public override component_setup()
+      self.setup()
+   end
+
+   public override end_dialog()
+   end
+
+   public override init_dialog()
+      # list of all currently available translations
+      my_locale := ["values", "values-ar", "values-bg-rBG",
+                    "values-cs-rCZ", "values-da-rDK", "values-de",
+                    "values-es", "values-fi-rFI", "values-fil-rPH",
+                    "values-fr", "values-he-rIL", "values-hi-rIN",
+                    "values-hu-rHU", "values-id-rID", "values-it",
+                    "values-ja-rJP", "values-ko-rKR", "values-nb-rNO",
+                    "values-nl", "values-pl-rPL", "values-pt",
+                    "values-ru-rRU", "values-sv-rSE", "values-th-rTH",
+                    "values-tr-rTR", "values-uk-rUA", "values-vi-rVN",
+                    "values-zh-rCN", "values-zh-rTW"]
+      # table that holds translation data
+      resources := table(u"Missing entry!")
+      # table to record student answers
+      grades := table()
+      # DEFAULT TO YOUR LANGUAGE : use index number from my_locale[] above
+      # set English as default translation
+      self.set_language(1)
+      # SET to 1 to LOCK in YOUR LANGUAGE ONLY
+      self.locked := 0
+      if self.locked = 1 then self.language.set_is_shaded(&yes)
+      # first page
+      self.page_num := 1
+      # nothing attempted
+      attempts := 0
+      # no answers yet
+      success  := 0
+      # reset gui
+      testing(0)
+   end
+
+   public override new()
+      Dialog.new()
+      return
+   end
+
+   private on_cancel(ev)
+      # reset gui
+      testing(0)
+   end
+
+   private testing(status)
+      case status of {
+         1 : { # setup gui for multiple choice
+            self.test_format := 1
+            self.user_msg.set_paint(TextPaint(resources["question"]))
+            self.language.set_is_shaded(&yes)
+            self.page_number.set_is_shaded(&yes)
+            self.multiple_choice.set_is_hidden(&yes)
+            self.spell.set_is_hidden(&yes)
+            self.cancel.set_is_hidden(&no)
+            self.check_spelt.set_is_hidden(&yes)
+            self.report_card.set_is_hidden(&yes)
+            self.spelt.set_is_hidden(&yes)
+            self.reply_a.set_is_hidden(&no)
+            self.reply_c.set_is_hidden(&no)
+            self.reply_b.set_is_hidden(&no)
+            self.reply_d.set_is_hidden(&no)
+         }
+         2 : { # setup gui for spelling
+            self.test_format := 2
+            self.user_msg.set_paint(TextPaint(resources["spell"]))
+            self.language.set_is_shaded(&yes)
+            self.page_number.set_is_shaded(&yes)
+            self.multiple_choice.set_is_hidden(&yes)
+            self.spell.set_is_hidden(&yes)
+            self.cancel.set_is_hidden(&no)
+            self.check_spelt.set_is_hidden(&no)
+            self.report_card.set_is_hidden(&yes)
+            self.spelt.set_is_hidden(&no)
+            self.set_focus(self.spelt)
+            self.reply_a.set_is_hidden(&yes)
+            self.reply_c.set_is_hidden(&yes)
+            self.reply_b.set_is_hidden(&yes)
+            self.reply_d.set_is_hidden(&yes)
+         }
+         default : { # reset gui
+            self.test_format := 0
+            if self.locked = 0 then self.language.set_is_shaded(&no)
+            self.page_number.set_is_shaded(&no)
+            self.multiple_choice.set_is_hidden(&no)
+            self.spell.set_is_hidden(&no)
+            self.cancel.set_is_hidden(&yes)
+            self.check_spelt.set_is_hidden(&yes)
+            self.report_card.set_is_hidden(&no)
+            self.spelt.set_is_hidden(&yes)
+            self.reply_a.set_is_hidden(&yes)
+            self.reply_c.set_is_hidden(&yes)
+            self.reply_b.set_is_hidden(&yes)
+            self.reply_d.set_is_hidden(&yes)
+            # only clear these type messages - leave "reward" and "wrong"
+            if (self.user_msg.paint.str ==
+               (resources["question"]|resources["spell"])) then
+                  transmit(u"")
+         }
+      }
+   end
+
+   private on_check_spelt(ev)
+      # check student spelling
+      self.evaluate(self.spelt.get_contents())
+   end
+
+   private on_close_button(ev)
+      # exit program
+      dispose()
+   end
+
+   private on_language(ev)
+      # open new translation
+      self.set_language(language.get_selection())
+   end
+
+   private set_language(index)
+      local p,s,d,e,b,c,i
+      p := XmlParser()
+      s := Files.file_to_string(my_locale[index]||"/strings.xml") |
+         stop("Couldn't open strings.xml : ", &why)
+      d := p.parse(s) | stop("Couldn't parse:", &why)
+      e := d.get_root_element()
+      if *grades = 0 then {
+         # should new grade book be created
+         b := 1
+      } else
+         # already have a grade book
+         b := 0
+      every c := e.search_children("string") do {
+         i := c.get_attribute("name")
+         resources[i] := ucs(c.get_string_content())
+         # for each lesson create list to hold :
+         #  1) count of correct multiple choice answers
+         #  2) count of incorrect multiple choice answers
+         #  3) count of correct spellings
+         #  4) count of incorrect spellings
+         if b = 1 then {
+            # only create grades for ones that begin with "P"
+            if i[1] == "P" then {
+               grades[i] := [0,0,0,0]
+            }
+         }
+      }
+      # set welcome message for this translation
+      transmit(resources["welcome"])
+      if b = 1 then {
+         # beginning grade is zero
+         self.grade := 0
+         # first lesson in selected translation
+         change_lesson(1)
+      } else {
+         # keep current lesson but make sure translation is updated
+         change_lesson(self.page_num)
+      }
+      # update translation for grade
+      self.posted.set_paint(TextPaint(resources["grade"]||" - "||self.grade))
+   end
+
+   private on_multiple_choice(ev)
+      local need_num, pick_one, pick_idx, rand_num
+      # create list to hold answer and three incorrect choices
+      pick_one := list(4)
+      # first item
+      pick_idx := 1
+      # correct answer needed if not in our limited permutation values
+      need_num := 1
+      # there are 445 lessons "P1001 to P1445" but 458 XML elements
+      every rand_num := permutation(445) \ 4 do {
+         if rand_num = self.page_num then need_num := 0
+         pick_one[pick_idx] := rand_num
+         # increment list index
+         pick_idx +:= 1
+      }
+      # if needed, replace one permutation item with correct answer
+      if need_num = 1 then {
+         randomize()
+         rand_num := ? 4
+         pick_one[rand_num] := self.page_num
+      }
+      self.reply_a.set_paint(TextPaint(resources["P"||pick_one[1] + 1000]))
+      self.reply_c.set_paint(TextPaint(resources["P"||pick_one[2] + 1000]))
+      self.reply_b.set_paint(TextPaint(resources["P"||pick_one[3] + 1000]))
+      self.reply_d.set_paint(TextPaint(resources["P"||pick_one[4] + 1000]))
+      # setup gui for multiple choice
+      testing(1)
+   end
+
+   private on_page_number(ev)
+      # no state change unless number is in the valid range
+      if \self.page_number.get_value() then
+         change_lesson(self.page_number.get_value())
+   end
+
+   private change_lesson(index)
+      self.page_num := index
+      self.quiz_num := "P"||index + 1000
+      chalkboard.set_image("images/"||self.quiz_num||".png")
+      correct_answer := resources[self.quiz_num]
+      # NEXT LINE ONLY USED FOR TEST AND DEBUG
+      #self.posted.set_paint(TextPaint(correct_answer))
+      # clear last message
+      self.user_msg.set_paint(TextPaint(u""))
+      # clear last spelling attempt for new lesson
+      self.spelt.set_contents(u"")
+   end
+
+   private evaluate(student_answer)
+      if *student_answer > 0 then { # ignore blank spelling attempts
+         # increment student attempts
+         attempts := attempts + 1
+         if student_answer == correct_answer then {
+            # increment number of correct answers
+            success := success + 1
+            if test_format = 1 then {
+               # correct multiple choice answer
+               grades[quiz_num][1] := grades[quiz_num][1] + 1
+            } else {
+               # user spelling was correct
+               grades[quiz_num][3] := grades[quiz_num][3] + 1
+            }
+            transmit(resources["reward"])
+         } else {
+            if test_format = 1 then {
+               # incorrect multiple choice answer
+               grades[quiz_num][2] := grades[quiz_num][2] + 1
+            } else {
+               # user spelling was incorrect
+               grades[quiz_num][4] := grades[quiz_num][4] + 1
+            }
+            transmit(resources["wrong"])
+         }
+         # update posted grade
+         if success > 0 then { # avoid division by zero
+            self.grade := integer(real(success) / real(attempts) * 100)
+         } else
+            self.grade := 0
+         self.posted.set_paint(TextPaint(resources["grade"]||" - "||self.grade))
+      }
+      # reset gui
+      testing(0)
+   end
+
+   private transmit(message)
+      # send the user a message
+      self.user_msg.set_paint(TextPaint(message))
+   end
+
+   private on_reply_a(ev)
+      # send first multiple choice button text
+      self.evaluate(self.reply_a.paint.str)
+   end
+
+   private on_reply_b(ev)
+      # send second multiple choice button text
+      self.evaluate(self.reply_b.paint.str)
+   end
+
+   private on_reply_c(ev)
+      # send third multiple choice button text
+      self.evaluate(self.reply_c.paint.str)
+   end
+
+   private on_reply_d(ev)
+      # send fourth multiple choice button text
+      self.evaluate(self.reply_d.paint.str)
+   end
+
+   private on_report_card(ev)
+      local d,data,fn,footer,header,html,i,mc,mi,sc,si,smc,smi,ssc,ssi,td,u,v
+      # place a copy of the report in temp directory if user wants it later
+      fn := Files.get_temp()||"/iconparatum.html"
+      # string to store all html table rows
+      data := ""
+      # report sum of correct multiple choice answers
+      smc := 0
+      # report sum of incorrect multiple choice answers
+      smi := 0
+      # report sum of correct spellings
+      ssc := 0
+      # report sum of incorrect spellings
+      ssi := 0
+      # lesson grade keys are "P1001 to P1445"
+      every i := 1001 to 1445 do {
+         # get list of grades for this lesson
+         v := grades["P"||i]
+         # correct multiple choice answers
+         mc := v[1]
+         # sum it for report
+         smc := smc + v[1]
+         # incorrect multiple choice answers
+         mi := v[2]
+         # sum it for report
+         smi := smi + v[2]
+         # correct spelling
+         sc := v[3]
+         # sum it for report
+         ssc := ssc + v[3]
+         # incorrect spelling
+         si := v[4]
+         # sum it for report
+         ssi := ssi + v[4]
+         # build the html table rows
+         td := "<tr valign=\"top\">\n"||
+            "<td width=\"33%\">\n"||
+            "<p align=\"left\">"||resources["P"||i]||"</p>\n"||
+            "</td>\n"||
+            "<td width=\"33%\">\n"||
+            "<p align=\"center\">"||mc||"/"||mc+mi||"</p>\n"||
+            "</td>\n"||
+            "<td width=\"33%\">\n"||
+            "<p align=\"center\">"||sc||"/"||sc+si||"</p>\n"||
+            "</td>\n"||
+            "</tr>"
+         # add grade values together
+         u := mc+mi+sc+si
+         # skip creating rows that the student did not complete
+         if u > 0 then data := data||td
+      }
+      # build html header
+      header := "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD "||
+         "HTML 4.0 Transitional//EN\">\n"||
+         "<html>\n"||
+         "<head>\n"||
+         "<meta http-equiv=\"CONTENT-TYPE\" content=\"text/html; "||
+         "charset=utf-8\">\n"||
+         "<title>"||"IConparatum"||"</title>\n"||
+         "</head>\n"||
+         "<body dir=\"ltr\">\n"||
+         "<center>\n"||
+         "<h1>"||resources["rpt_card"]||"</h1>\n"||
+         "</center>\n"||
+         "<table width=\"100%\" cellpadding=\"4\" cellspacing=\"1\">\n"||
+         "<col width=\"85*\">\n"||
+         "<col width=\"85*\">\n"||
+         "<col width=\"85*\">\n"||
+         "<tbody>\n"||
+         "<tr valign=\"top\">\n"||
+         "<th width=\"33%\">\n"||
+         "<p align=\"center\">"||resources["grade"]||"</p>\n"||
+         "</th>\n"||
+         "<th width=\"33%\">\n"||
+         "<p align=\"center\">"||resources["rpt_match"]||"</p>\n"||
+         "</th>\n"||
+         "<th width=\"33%\">\n"||
+         "<p align=\"center\">"||resources["rpt_spell"]||"</p>\n"||
+         "</th>\n"||
+         "</tr>\n"||
+         "<tr valign=\"top\">\n"||
+         "<td width=\"33%\">\n"||
+         "<p align=\"center\">"||self.grade||"</p>\n"||
+         "</td>\n"||
+         "<td width=\"33%\">\n"||
+         "<p align=\"center\">"||smc|| "/" ||smc+smi||"</p>\n"||
+         "</td>\n"||
+         "<td width=\"33%\">\n"||
+         "<p align=\"center\">"||ssc|| "/" ||ssc+ssi||"</p>\n"||
+         "</td>\n"||
+         "</tr>\n"||
+         "<tr valign=\"top\">\n"||
+         "<td width=\"33%\">\n"||
+         "<p align=\"left\">"||resources["rpt_words"]||"</p>\n"||
+         "</td>\n"||
+         "<td width=\"33%\">\n"||
+         "<p align=\"center\"><br>"||"</p>\n"||
+         "</td>\n"||
+         "<td width=\"33%\">\n"||
+         "<p align=\"center\"><br>"||"</p>\n"||
+         "</td>\n"||
+         "</tr>"
+      # build html footer
+      footer := "</tbody>\n"||
+         "</table>\n"||
+         "<p align=\"center\"><br>\n"||
+         "<br>"||
+         "</p>\n"||
+         "</body>\n"||
+         "</html>"
+      # put html page together
+      html := header||data||footer
+      # try to write our html to the file system
+      #   if that fails build one internally using the error message
+      if Files.string_to_file(fn, html) then {
+         data := ""
+      } else {
+         fn := ""
+         html := "<!DOCTYPE HTML PUBLIC \"-//W3C//DTD "||
+         "HTML 4.0 Transitional//EN\">\n"||
+         "<html>\n"||
+         "<head>\n"||
+         "<meta http-equiv=\"CONTENT-TYPE\" content=\"text/html; "||
+         "charset=utf-8\">\n"||
+         "</head>\n"||
+         "<body>\n"||
+         "File error : " || &why ||
+         "</body>\n"||
+         "</html>"
+      }
+      # show report html page or file creation error page
+      d := HTMLMessageDialog().
+         set_label(fn).
+         set_size(scale(600), scale(500))
+      d.browser.
+         set_page(html)
+      d.show_modal()
+   end
+
+   private on_spell(ev)
+      # setup gui for multiple choice
+      testing(2)
+   end
+
+   private setup()
+      local paint_27, paint_32, paint_24, paint_21, paint_29, paint_26, paint_23, paint_28, border_1, paint_25, paint_30, paint_22
+      self.set_icon("images/ic_launcher.png")
+      self.set_label("IConparatum")
+      self.set_size(scale(640), scale(560))
+      paint_21 := TextPaint(u"Score")
+      posted := Label().
+         set_pos(scale(10), scale(140)).
+         set_size(scale(405), scale(29)).
+         clear_constraints().
+         set_constraint(Grid.X_ALIGN, Align.L).
+         set_paint(paint_21)
+      self.add(posted)
+      language := List().
+         set_pos(scale(10), scale(10)).
+         set_size(scale(460)).
+         clear_constraints().
+         set_constraint(Grid.X_ALIGN, Align.L).
+         set_constraint(Grid.X_FILL, &yes).
+         set_constraint(Grid.X_WEIGHT, 1.0).
+         connect(self.on_language, Event.SELECTION_CHANGED).
+         set_selection_list([u"English (United States)", u"Arabic", u"Bulgarian (Bulgaria)", u"Czech (Czech Republic)", u"Danish (Denmark)", u"German", u"Spanish", u"Finnish (Finland)", u"Filipino (Philippines)", u"French", u"Hebrew (Israel)", u"Hindi (India)", u"Hungarian (Hungary)", u"Indonesian (Indonesia)", u"Italian", u"Japanese (Japan)", u"Korean (South Korea)", u"Norwegian Bokm\u00e5l (Norway)", u"Dutch", u"Polish (Poland)", u"Portuguese", u"Russian (Russia)", u"Swedish (Sweden)", u"Thai (Thailand)", u"Turkish (Turkey)", u"Ukrainian (Ukraine)", u"Vietnamese (Vietnam)", u"Chinese Simplified Han (China)", u"Chinese Traditional Han (Taiwan)"])
+      self.add(language)
+      page_number := RangeSpin().
+         set_pos(scale(10), scale(75)).
+         set_size(scale(405)).
+         set_tab_ord(1).
+         clear_constraints().
+         set_constraint(Grid.X_ALIGN, Align.L).
+         set_constraint(Grid.X_FILL, &yes).
+         set_constraint(Grid.X_WEIGHT, 1.0).
+         connect(self.on_page_number, Event.ACTION).
+         connect(self.on_page_number, Event.CONTENT_CHANGED).
+         set_range(1, 445).
+         set_value(1).
+         set_increment_size(1)
+      self.add(page_number)
+      border_1 := EmptyBorder()
+      chalkboard := Image().
+         set_pos(scale(418), scale(50)).
+         set_size(scale(212), scale(212)).
+         clear_constraints().
+         set_constraint(Grid.X_FILL, &yes).
+         set_constraint(Grid.X_WEIGHT, 1.0).
+         set_constraint(Grid.Y_FILL, &yes).
+         set_constraint(Grid.Y_WEIGHT, 1.0).
+         set_border(border_1).
+         set_image("images/P1001.png")
+      self.add(chalkboard)
+      paint_22 := ImagePaint().
+         set_image("images/ic_pick.png")
+      multiple_choice := IconButton().
+         set_pos(scale(10), scale(272)).
+         set_size(scale(76), scale(76)).
+         set_tab_ord(2).
+         clear_constraints().
+         connect(self.on_multiple_choice, Event.ACTION).
+         set_toggles(&no).
+         set_paint(paint_22)
+      self.add(multiple_choice)
+      paint_23 := ImagePaint().
+         set_image("images/ic_spell.png")
+      spell := IconButton().
+         set_pos(scale(282), scale(272)).
+         set_size(scale(76), scale(76)).
+         set_tab_ord(3).
+         clear_constraints().
+         connect(self.on_spell, Event.ACTION).
+         set_toggles(&no).
+         set_paint(paint_23)
+      self.add(spell)
+      paint_24 := ImagePaint().
+         set_image("images/ic_cancel.png")
+      cancel := IconButton().
+         set_pos(scale(146), scale(272)).
+         set_size(scale(76), scale(76)).
+         set_tab_ord(10).
+         clear_constraints().
+         connect(self.on_cancel, Event.ACTION).
+         set_toggles(&no).
+         set_paint(paint_24)
+      self.add(cancel)
+      paint_25 := ImagePaint().
+         set_image("images/ic_check.png")
+      check_spelt := IconButton().
+         set_pos(scale(418), scale(272)).
+         set_size(scale(76), scale(76)).
+         set_tab_ord(9).
+         clear_constraints().
+         connect(self.on_check_spelt, Event.ACTION).
+         set_toggles(&no).
+         set_paint(paint_25)
+      self.add(check_spelt)
+      paint_26 := ImagePaint().
+         set_image("images/ic_grade.png")
+      report_card := IconButton().
+         set_pos(scale(554), scale(272)).
+         set_size(scale(76), scale(76)).
+         set_tab_ord(11).
+         clear_constraints().
+         connect(self.on_report_card, Event.ACTION).
+         set_toggles(&no).
+         set_paint(paint_26)
+      self.add(report_card)
+      spelt := TextField().
+         set_pos(scale(10), scale(360)).
+         set_size(scale(620)).
+         set_tab_ord(4).
+         clear_constraints().
+         set_constraint(Grid.X_ALIGN, Align.L).
+         set_constraint(Grid.X_FILL, &yes).
+         set_constraint(Grid.X_WEIGHT, 1.0).
+         set_contents(u"")
+      self.add(spelt)
+      paint_27 := TextPaint(u"")
+      reply_a := TextButton().
+         set_pos(scale(10), scale(400)).
+         set_size(scale(620), scale(29)).
+         set_tab_ord(5).
+         clear_constraints().
+         connect(self.on_reply_a, Event.ACTION).
+         set_toggles(&no).
+         set_paint(paint_27)
+      self.add(reply_a)
+      paint_28 := TextPaint(u"")
+      reply_b := TextButton().
+         set_pos(scale(10), scale(440)).
+         set_size(scale(620), scale(29)).
+         set_tab_ord(6).
+         clear_constraints().
+         connect(self.on_reply_b, Event.ACTION).
+         set_toggles(&no).
+         set_paint(paint_28)
+      self.add(reply_b)
+      paint_29 := TextPaint(u"")
+      reply_c := TextButton().
+         set_pos(scale(10), scale(480)).
+         set_size(scale(620), scale(29)).
+         set_tab_ord(7).
+         clear_constraints().
+         connect(self.on_reply_c, Event.ACTION).
+         set_toggles(&no).
+         set_paint(paint_29)
+      self.add(reply_c)
+      paint_30 := TextPaint(u"")
+      reply_d := TextButton().
+         set_pos(scale(10), scale(520)).
+         set_size(scale(620), scale(29)).
+         set_tab_ord(8).
+         clear_constraints().
+         connect(self.on_reply_d, Event.ACTION).
+         set_toggles(&no).
+         set_paint(paint_30)
+      self.add(reply_d)
+      paint_32 := TextPaint(u"")
+      user_msg := Label().
+         set_pos(scale(10), scale(205)).
+         set_size(scale(405), scale(29)).
+         clear_constraints().
+         set_constraint(Grid.X_ALIGN, Align.L).
+         set_paint(paint_32)
+      self.add(user_msg)
+      self.connect(self.on_close_button, Event.WINDOW_CLOSE_BUTTON)
+   end
+end
+
+procedure main()
+   local d
+   d := IConparatum()
+   d.show_modal()
+end
+
+### Ivib-v2 layout: layout/$.layout
