@@ -15,7 +15,7 @@
 #
 ############################################################################
 #
-#  Version:  1.0.0
+#  Version:  1.0.1
 #
 ############################################################################
 #
@@ -470,7 +470,8 @@ class IConparatum(Dialog)
       # show report html page or file creation error page
       d := HTMLMessageDialog().
          set_label(fn).
-         set_size(scale(600), scale(500))
+         set_size(scale(600), scale(500)).
+         set_icon("images/ic_launcher.png")
       d.browser.
          set_page(html)
       d.show_modal()
